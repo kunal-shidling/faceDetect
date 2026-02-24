@@ -1,0 +1,424 @@
+"""
+Database module for storing and retrieving face embeddings.
+Uses MongoDB for persistent storage.
+"""
+
+import numpy as np
+from pymongo import MongoClient, ASCENDING
+from pymongo.errors import ConnectionFailure, DuplicateKeyError
+from datetime import datetime
+from typing import Optional, List, Dict, Tuple
+import logging
+import config
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+
+class FaceDatabase:
+    """MongoDB database handler for face embeddings."""
+    
+    def __init__(self, uri: str = config.MONGODB_URI):
+        """
+        Initialize database connection.
+        
+        Args:
+            uri: MongoDB connection URI
+        """
+        self.uri = uri
+        self.client = None
+        self.db = None
+        self.collection = None
+        self._connected = False
+    
+    def connect(self) -> bool:
+        """
+        Connect to MongoDB database.
+        
+        Returns:
+            bool: True if connection successful, False otherwise
+        """
+        try:
+            # Create client
+            self.client = MongoClient(self.uri, serverSelectionTimeoutMS=5000)
+            
+            # Test connection
+            self.client.admin.command('ping')
+            
+            # Get database and collection
+            self.db = self.client[config.MONGODB_DATABASE]
+            self.collection = self.db[config.MONGODB_COLLECTION]
+            
+            # Create indexes
+            self._create_indexes()
+            
+            self._connected = True
+            logger.info(f"Connected to MongoDB: {config.MONGODB_DATABASE}.{config.MONGODB_COLLECTION}")
+            
+            return True
+            
+        except ConnectionFailure as e:
+            logger.error(f"Failed to connect to MongoDB: {e}")
+            self._connected = False
+            return False
+        except Exception as e:
+            logger.error(f"Error connecting to database: {e}")
+            self._connected = False
+            return False
+    
+    def _create_indexes(self):
+        """Create database indexes for efficient querying."""
+        try:
+            # Create index on name for faster lookups
+            self.collection.create_index([("name", ASCENDING)])
+            logger.debug("Database indexes created")
+        except Exception as e:
+            logger.warning(f"Error creating indexes: {e}")
+    
+    def disconnect(self):
+        """Disconnect from MongoDB."""
+        if self.client:
+            self.client.close()
+            self._connected = False
+            logger.info("Disconnected from MongoDB")
+    
+    def is_connected(self) -> bool:
+        """Check if database is connected."""
+        return self._connected
+    
+    def _embedding_to_list(self, embedding: np.ndarray) -> List[float]:
+        """
+        Convert numpy embedding to list for MongoDB storage.
+        
+        Args:
+            embedding: Numpy array embedding
+            
+        Returns:
+            List[float]: Embedding as list with full precision
+        """
+        # Convert to Python float to preserve precision
+        return [float(x) for x in embedding]
+    
+    def _list_to_embedding(self, embedding_list: List[float]) -> np.ndarray:
+        """
+        Convert list from MongoDB to numpy embedding.
+        
+        Args:
+            embedding_list: Embedding as list
+            
+        Returns:
+            np.ndarray: Numpy array embedding
+        """
+        return np.array(embedding_list, dtype=np.float64)
+    
+    def validate_embedding(self, embedding: np.ndarray) -> bool:
+        """
+        Validate embedding dimensions.
+        
+        Args:
+            embedding: Embedding to validate
+            
+        Returns:
+            bool: True if valid, False otherwise
+        """
+        if embedding is None:
+            logger.error("Embedding is None")
+            return False
+        
+        if len(embedding) != config.EMBEDDING_SIZE:
+            logger.error(
+                f"Invalid embedding size: {len(embedding)}, "
+                f"expected {config.EMBEDDING_SIZE}"
+            )
+            return False
+        
+        return True
+    
+    def check_duplicate_embedding(self, embedding: np.ndarray) -> Tuple[bool, Optional[str]]:
+        """
+        Check if embedding is too similar to existing ones (potential duplicate).
+        
+        Args:
+            embedding: Embedding to check
+            
+        Returns:
+            Tuple[bool, Optional[str]]: (is_duplicate, name_of_duplicate)
+        """
+        try:
+            # Get all embeddings from database
+            all_records = self.get_all_embeddings()
+            
+            if not all_records:
+                return False, None
+            
+            # Compare with all stored embeddings
+            from embedder import FaceEmbedder
+            embedder = FaceEmbedder()
+            
+            for record in all_records:
+                stored_embedding = record['embedding']
+                similarity = embedder.compare_embeddings(embedding, stored_embedding)
+                
+                if similarity >= config.DUPLICATE_THRESHOLD:
+                    logger.warning(
+                        f"Duplicate embedding detected - "
+                        f"Similarity: {similarity:.4f} with '{record['name']}'"
+                    )
+                    return True, record['name']
+            
+            return False, None
+            
+        except Exception as e:
+            logger.error(f"Error checking duplicate embedding: {e}")
+            return False, None
+    
+    def store_embedding(
+        self,
+        name: str,
+        embedding: np.ndarray,
+        check_duplicates: bool = True
+    ) -> bool:
+        """
+        Store face embedding in database.
+        
+        Args:
+            name: Person's name
+            embedding: Face embedding vector
+            check_duplicates: Whether to check for duplicate embeddings
+            
+        Returns:
+            bool: True if stored successfully, False otherwise
+        """
+        try:
+            if not self.is_connected():
+                logger.error("Database not connected")
+                return False
+            
+            # Validate embedding
+            if not self.validate_embedding(embedding):
+                return False
+            
+            # Check for duplicates if enabled
+            if check_duplicates:
+                is_duplicate, duplicate_name = self.check_duplicate_embedding(embedding)
+                if is_duplicate:
+                    logger.warning(
+                        f"Embedding too similar to existing entry: '{duplicate_name}'"
+                    )
+                    return False
+            
+            # Prepare document
+            document = {
+                'name': name,
+                'embedding': self._embedding_to_list(embedding),
+                'date': datetime.utcnow(),
+                'embedding_size': len(embedding)
+            }
+            
+            # Insert into database
+            result = self.collection.insert_one(document)
+            
+            logger.info(
+                f"Stored embedding for '{name}' - "
+                f"ID: {result.inserted_id}, Size: {len(embedding)}"
+            )
+            
+            return True
+            
+        except DuplicateKeyError:
+            logger.error(f"Duplicate entry for name: {name}")
+            return False
+        except Exception as e:
+            logger.error(f"Error storing embedding: {e}")
+            return False
+    
+    def get_all_embeddings(self) -> List[Dict]:
+        """
+        Retrieve all stored embeddings.
+        
+        Returns:
+            List[Dict]: List of records with name and embedding
+        """
+        try:
+            if not self.is_connected():
+                logger.error("Database not connected")
+                return []
+            
+            # Query all documents
+            cursor = self.collection.find({}, {'name': 1, 'embedding': 1, 'date': 1})
+            
+            records = []
+            for doc in cursor:
+                records.append({
+                    'name': doc['name'],
+                    'embedding': self._list_to_embedding(doc['embedding']),
+                    'date': doc.get('date')
+                })
+            
+            logger.debug(f"Retrieved {len(records)} embeddings from database")
+            return records
+            
+        except Exception as e:
+            logger.error(f"Error retrieving embeddings: {e}")
+            return []
+    
+    def get_embedding_by_name(self, name: str) -> Optional[np.ndarray]:
+        """
+        Retrieve embedding for a specific person.
+        
+        Args:
+            name: Person's name
+            
+        Returns:
+            Optional[np.ndarray]: Embedding if found, None otherwise
+        """
+        try:
+            if not self.is_connected():
+                logger.error("Database not connected")
+                return None
+            
+            # Query by name
+            doc = self.collection.find_one({'name': name})
+            
+            if doc is None:
+                logger.debug(f"No embedding found for name: {name}")
+                return None
+            
+            embedding = self._list_to_embedding(doc['embedding'])
+            logger.debug(f"Retrieved embedding for '{name}' - Size: {len(embedding)}")
+            
+            return embedding
+            
+        except Exception as e:
+            logger.error(f"Error retrieving embedding by name: {e}")
+            return None
+    
+    def delete_embedding(self, name: str) -> bool:
+        """
+        Delete embedding from database.
+        
+        Args:
+            name: Person's name
+            
+        Returns:
+            bool: True if deleted successfully, False otherwise
+        """
+        try:
+            if not self.is_connected():
+                logger.error("Database not connected")
+                return False
+            
+            result = self.collection.delete_one({'name': name})
+            
+            if result.deleted_count > 0:
+                logger.info(f"Deleted embedding for: {name}")
+                return True
+            else:
+                logger.warning(f"No embedding found to delete: {name}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error deleting embedding: {e}")
+            return False
+    
+    def count_embeddings(self) -> int:
+        """
+        Count total number of stored embeddings.
+        
+        Returns:
+            int: Number of embeddings
+        """
+        try:
+            if not self.is_connected():
+                logger.error("Database not connected")
+                return 0
+            
+            count = self.collection.count_documents({})
+            logger.debug(f"Total embeddings in database: {count}")
+            
+            return count
+            
+        except Exception as e:
+            logger.error(f"Error counting embeddings: {e}")
+            return 0
+    
+    def clear_all_embeddings(self) -> bool:
+        """
+        Clear all embeddings from database (use with caution!).
+        
+        Returns:
+            bool: True if cleared successfully, False otherwise
+        """
+        try:
+            if not self.is_connected():
+                logger.error("Database not connected")
+                return False
+            
+            result = self.collection.delete_many({})
+            logger.warning(f"Cleared {result.deleted_count} embeddings from database")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error clearing embeddings: {e}")
+            return False
+
+
+def main():
+    """Test database module."""
+    logging.basicConfig(
+        level=getattr(logging, config.LOG_LEVEL),
+        format=config.LOG_FORMAT,
+        datefmt=config.LOG_DATE_FORMAT
+    )
+    
+    # Create database instance
+    db = FaceDatabase()
+    
+    # Connect
+    if not db.connect():
+        print("Failed to connect to database")
+        print("\nMake sure MongoDB is running:")
+        print("  1. Install MongoDB: https://www.mongodb.com/try/download/community")
+        print("  2. Start MongoDB service")
+        print(f"  3. Ensure it's running on: {config.MONGODB_URI}")
+        return
+    
+    print("Connected to database successfully!")
+    
+    # Get count
+    count = db.count_embeddings()
+    print(f"Total embeddings in database: {count}")
+    
+    # Test with dummy embedding
+    dummy_embedding = np.random.randn(config.EMBEDDING_SIZE)
+    dummy_embedding = dummy_embedding / np.linalg.norm(dummy_embedding)  # L2 normalize
+    
+    # Store
+    print("\nStoring test embedding...")
+    if db.store_embedding("Test User", dummy_embedding):
+        print("✓ Embedding stored successfully")
+    else:
+        print("✗ Failed to store embedding")
+    
+    # Retrieve
+    print("\nRetrieving test embedding...")
+    retrieved = db.get_embedding_by_name("Test User")
+    if retrieved is not None:
+        print("✓ Embedding retrieved successfully")
+        print(f"  Shape: {retrieved.shape}")
+        print(f"  First 5 values: {retrieved[:5]}")
+    else:
+        print("✗ Failed to retrieve embedding")
+    
+    # Cleanup
+    print("\nCleaning up test data...")
+    db.delete_embedding("Test User")
+    
+    # Disconnect
+    db.disconnect()
+    print("\nDatabase test complete!")
+
+
+if __name__ == "__main__":
+    main()
