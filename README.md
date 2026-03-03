@@ -97,9 +97,27 @@ MONGODB_URI = "mongodb://localhost:27017/"
 
 ## 📖 Usage
 
-### Interactive Mode (Live Camera)
+### Continuous Monitoring (⭐ Recommended for Meetings)
 
-Capture faces in real-time and automatically recognize or register:
+**NEW!** Real-time multi-face detection and recognition:
+
+```powershell
+python continuous.py
+```
+
+**Features:**
+- Camera stays on continuously
+- Detects multiple faces simultaneously
+- Green boxes with names for recognized people
+- Red boxes for unknown people
+- Real-time FPS and statistics
+- Press `q` to quit
+
+**Perfect for:** Meeting rooms, office entrances, attendance tracking
+
+### Interactive Mode (Single Face Capture)
+
+Capture one face at a time for registration:
 
 ```powershell
 python main.py
@@ -406,5 +424,6 @@ This project is for educational and research purposes.
 **Author**: Built with GitHub Copilot  
 **Date**: February 2026  
 **Version**: 1.0.0
-#   f a c e D e t e c t  
+#   f a c e D e t e c t 
+ 
  

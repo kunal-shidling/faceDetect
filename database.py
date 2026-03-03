@@ -39,8 +39,18 @@ class FaceDatabase:
             bool: True if connection successful, False otherwise
         """
         try:
-            # Create client
-            self.client = MongoClient(self.uri, serverSelectionTimeoutMS=5000)
+            # Import SSL for certificate handling
+            import ssl
+            import certifi
+            
+            # Create client with SSL/TLS parameters for MongoDB Atlas
+            self.client = MongoClient(
+                self.uri,
+                serverSelectionTimeoutMS=10000,
+                tls=True,
+                tlsAllowInvalidCertificates=True,  # Bypass SSL verification
+                tlsCAFile=certifi.where()  # Use certifi certificates
+            )
             
             # Test connection
             self.client.admin.command('ping')

@@ -48,6 +48,10 @@ MONGODB_URI ="mongodb+srv://kunalshidling_db_user:7oVEGpDYgJF63mQW@cluster0.57sk
 MONGODB_DATABASE = "meeting_assistant"
 MONGODB_COLLECTION = "face_embeddings"
 
+# MongoDB SSL/TLS settings (for Atlas)
+MONGODB_TLS = True
+MONGODB_TLS_ALLOW_INVALID_CERTIFICATES = True  # Set to False in production with valid certs
+
 # ==================== Storage Settings ====================
 # Temporary storage
 TEMP_DIR = os.path.join(os.path.dirname(__file__), "temp")

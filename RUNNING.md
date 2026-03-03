@@ -144,9 +144,51 @@ If you see errors, double-check your connection string and network access settin
 
 ## 🎥 Running the Application
 
-### Interactive Mode (Recommended for First Use)
+### Mode 1: Continuous Monitoring (⭐ RECOMMENDED for Meetings)
 
-This mode uses your webcam to capture faces in real-time.
+**NEW!** Real-time multi-face detection and recognition - Perfect for meeting assistants!
+
+```powershell
+python continuous.py
+```
+
+**Features:**
+- 🎥 **Camera stays on** - No button pressing needed
+- 👥 **Multiple faces** - Detects and recognizes everyone simultaneously  
+- 🟢 **Green boxes** - Known people with names displayed
+- 🔴 **Red boxes** - Unknown people
+- ⚡ **Real-time** - Instant recognition as people appear
+- 📊 **Live stats** - FPS, face count, registered people count
+
+**How it works:**
+1. Camera window opens with live feed
+2. System continuously scans for faces
+3. Recognized people → Green box with name and confidence
+4. Unknown people → Red box with "Unknown"
+5. Press **`q`** to quit anytime
+
+**Example output:**
+```
+CONTINUOUS FACE MONITORING - REAL-TIME RECOGNITION
+Features:
+  🎥 Camera stays on continuously
+  👥 Detects multiple faces simultaneously
+  🟢 Green box = Recognized person (with name)
+  🔴 Red box = Unknown person
+  ⚡ Real-time processing
+
+Controls:
+  Press 'q' to quit
+```
+
+**Visual Example:**
+- When John walks in: Green box appears with "John Doe (92%)"
+- When Sarah walks in: Green box appears with "Sarah Smith (89%)"
+- When unknown person walks in: Red box appears with "Unknown"
+
+### Mode 2: Interactive Mode (Single Capture)
+
+This mode captures one person at a time - good for initial registration.
 
 ```powershell
 python main.py
@@ -202,7 +244,7 @@ RESULT:
   Status: Returning person
 ```
 
-### Batch Mode (Process Saved Image)
+### Mode 3: Batch Mode (Process Saved Image)
 
 If you have a saved image instead of using webcam:
 
@@ -210,7 +252,7 @@ If you have a saved image instead of using webcam:
 python main.py path\to\image.jpg
 ```
 
-### List All Registered People
+### Mode 4: List All Registered People
 
 ```powershell
 python main.py --list
